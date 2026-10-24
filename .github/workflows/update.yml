@@ -2,8 +2,8 @@ name: Auto Update kr-iptv
 
 on:
   schedule:
-    - cron: '0 */4 * * *'  # 每4小时自动同步一次
-  workflow_dispatch:        # 支持在 GitHub 页面手动一键触发
+    - cron: '0 */4 * * *'  # 4시간마다 자동 실행
+  workflow_dispatch:        # 수동 실행 지원
 
 jobs:
   update:
@@ -24,13 +24,37 @@ jobs:
         run: python3 update.py
 
       - name: Commit and push if changed
+        id: commit_step
         run: |
           git config --local user.name "github-actions[bot]"
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git add kr.m3u kr.xml version.json
           if git diff --staged --quiet; then
             echo "No changes detected. Skipping commit."
+            echo "changed=false" >> $GITHUB_OUTPUT
           else
             git commit -m "Auto update kr.m3u and kr.xml [skip ci]"
             git push
+            echo "changed=true" >> $GITHUB_OUTPUT
           fi
+
+      # ----------------------------------------------------
+      # 텔레그램 알림 전송 스텝
+      # (저장소 Settings → Secrets and variables → Actions 에
+      #  TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID 를 등록해야 동작)
+      # ----------------------------------------------------
+      - name: Send Telegram Notification
+        if: always() # 성공/실패 여부와 관계없이 실행
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          format: markdown
+          message: |
+            *📺 IPTV 자동 업데이트 리포트*
+
+            • *상태:* ${{ job.status == 'success' && '✅ 성공' || '❌ 실패' }}
+            • *변경 사항:* ${{ steps.commit_step.outputs.changed == 'true' && '🔄 kr.m3u/kr.xml 갱신 완료' || '⏸️ 변경 없음 (스킵)' }}
+            • *실행 방식:* ${{ github.event_name == 'schedule' && '정기 실행' || '수동 실행' }}
+
+            [저장소 바로가기](https://github.com/${{ github.repository }}) · [실행 기록](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
